@@ -153,7 +153,9 @@ button, select, input { font-family: var(--font); }
 .howto { margin-top: 16px; color: var(--text); }
 .howto summary { cursor: pointer; color: var(--head); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 13px; }
 .howto-body { padding: 8px 0 0; max-width: 90ch; }
-.legend { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; }
+.legend { list-style: none; padding: 0; margin: 8px 0 0; columns: 2 300px; column-gap: 32px; }
+.legend li { break-inside: avoid; margin: 0 0 8px; }
+.legend .tail { white-space: nowrap; }
 .legend b { color: var(--head); font-weight: 700; }
 
 .site-footer { display: flex; align-items: center; gap: 10px 28px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -169,7 +171,7 @@ button, select, input { font-family: var(--font); }
 .daypart { color: var(--stage-muted); min-height: 14px; margin-top: 4px; }
 .mon-now { min-width: 0; }
 .now-label { color: var(--stage-muted); }
-.now-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-height: 18px; }
+.now-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; height: 26px; overflow: hidden; }
 .now-call { font-size: 12px; color: var(--stage-muted); }
 .now-program { font-size: 16px; font-weight: 700; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .genre-chip { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; }
@@ -360,13 +362,13 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
       <ul class="legend">
         <li><b>Playing.</b> Space plays and pauses. Click the timeline to scrub. Click a row or a station to hear only that one.</li>
         <li><b>Vibe.</b> Zen is slow and sparse. Pulse keeps the beat and stays in key. Blitz plays every ad, with full distortion.</li>
-        <li><b>Pitch.</b> <span id="explain-pitch">Democrats high, Republicans low, independents and other groups in the middle.</span> Each advertiser keeps its own note everywhere it appears. <button class="demo-btn" type="button" data-demo="instrument-dem" aria-label="Hear Democrats">&#9654;</button><button class="demo-btn" type="button" data-demo="instrument-rep" aria-label="Hear Republicans">&#9654;</button></li>
+        <li><b>Pitch.</b> <span id="explain-pitch">Democrats high, Republicans low, independents and other groups in the middle.</span> Each advertiser keeps its own note everywhere it <span class="tail">appears. <button class="demo-btn" type="button" data-demo="instrument-dem" aria-label="Hear Democrats">&#9654;</button><button class="demo-btn" type="button" data-demo="instrument-rep" aria-label="Hear Republicans">&#9654;</button></span></li>
         <li><b>Instrument.</b> <span id="explain-instrument">In Pulse, Democrats play mallet, Republicans woodwind, everyone else organ.</span> <button class="demo-btn" type="button" data-demo="instrument-ind" aria-label="Hear independents">&#9654;</button></li>
-        <li><b>Candidates</b> sit on the root of the chord. Outside groups and coordinated buys color it with a thicker, detuned voice. <button class="demo-btn" type="button" data-demo="roles" aria-label="Hear a candidate, then an outside group">&#9654;</button></li>
+        <li><b>Candidates</b> sit on the root of the chord. Outside groups and coordinated buys color it with a thicker, detuned <span class="tail">voice. <button class="demo-btn" type="button" data-demo="roles" aria-label="Hear a candidate, then an outside group">&#9654;</button></span></li>
         <li><b>Negative ads</b> <span id="explain-tone">snarl down into their note with a burst of static and keep a permanent edge. Contrast ads bend half as far.</span> <button class="demo-btn" type="button" data-demo="tone" aria-label="Hear positive, then negative">&#9654;</button></li>
-        <li><b>Louder</b> means a more expensive spot. Zero-cost rows still play, quietly. <button class="demo-btn" type="button" data-demo="spend" aria-label="Hear cheap, then expensive">&#9654;</button></li>
-        <li><b>Longer</b> notes are 60-second spots. Short ones are 15. <button class="demo-btn" type="button" data-demo="length" aria-label="Hear 15 seconds, then 60">&#9654;</button></li>
-        <li><b>Cable</b> airings sound muffled and distant, like a TV in the next room. <button class="demo-btn" type="button" data-demo="media" aria-label="Hear broadcast, then cable">&#9654;</button></li>
+        <li><b>Louder</b> means a more expensive spot. Zero-cost rows still play, <span class="tail">quietly. <button class="demo-btn" type="button" data-demo="spend" aria-label="Hear cheap, then expensive">&#9654;</button></span></li>
+        <li><b>Longer</b> notes are 60-second spots. Short ones are <span class="tail">15. <button class="demo-btn" type="button" data-demo="length" aria-label="Hear 15 seconds, then 60">&#9654;</button></span></li>
+        <li><b>Cable</b> airings sound muffled and distant, like a TV in the next <span class="tail">room. <button class="demo-btn" type="button" data-demo="media" aria-label="Hear broadcast, then cable">&#9654;</button></span></li>
         <li><b>Pressure.</b> <span id="explain-pressure">The pressure meter climbs as ads pile up per minute.</span> <button class="demo-btn" type="button" data-demo="pressure" aria-label="Hear the pile-up">&#9654;</button></li>
         <li><b>Ad wall.</b> The screens just above the timeline show each ad you hear as it airs, with its network. Turn it off with Ad wall.</li>
         <li><b>Dots.</b> The key above the timeline decodes them. Color is the sponsor&rsquo;s party, fill is the ad&rsquo;s tone, size is its length, and cable airings are fainter. Hover any dot to see the ad and the show it ran in. Click it to keep the card open and watch the ad on AdImpact.</li>
