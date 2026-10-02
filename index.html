@@ -113,7 +113,6 @@ button, select, input { font-family: var(--font); }
 .toggle[aria-pressed="true"] { color: var(--head); border-color: var(--accent); font-weight: 700; }
 .field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
 .field > span { color: var(--head); white-space: nowrap; }
-.field input[type=range] { width: 80px; accent-color: var(--accent); }
 .field input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
 
 .stage { position: relative; margin-top: 12px; background: var(--stage); color: var(--stage-ink); border-radius: 10px; overflow: hidden; }
@@ -299,7 +298,6 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
         <option value="360">6 min</option>
       </select>
     </label>
-    <label class="field"><span>Volume</span><input type="range" id="volume" min="0" max="1" step="0.01" value="0.8"></label>
     <div class="field"><span id="sound-mode-label">Vibe</span><div class="segmented" id="sound-mode" role="group" aria-labelledby="sound-mode-label"></div></div>
     <button class="toggle" id="wall-toggle" type="button" aria-pressed="true" title="Show each ad as it airs">Ad wall</button>
     <div class="field"><span id="sound-high-label">High notes</span><div class="segmented" id="sound-high" role="group" aria-labelledby="sound-high-label"><button type="button" data-high="dem">Democrats</button><button type="button" data-high="rep">Republicans</button></div></div>
@@ -793,19 +791,19 @@ const SOUND_MODES = [
     id: 'zen', label: 'Zen', blurb: 'Slow, sparse, meditative.',
     high: 'wood', low: 'organ', ind: 'mallet',
     switches: { plain: true, bass: true, cap: false, sparse: true, grid: false, harmony: false, breathe: true },
-    overload: false, intensity: 1,
+    overload: false, intensity: 1, level: 0,
   },
   {
     id: 'pulse', label: 'Pulse', blurb: 'On the beat, in key, no distortion.',
     high: 'mallet', low: 'wood', ind: 'organ',
     switches: { plain: true, bass: true, cap: true, sparse: false, grid: true, harmony: true, breathe: false },
-    overload: false, intensity: 1,
+    overload: false, intensity: 1, level: 0,
   },
   {
     id: 'blitz', label: 'Blitz', blurb: 'Every ad, full distortion.',
     high: 'brass', low: 'brass', ind: 'organ',
     switches: { plain: false, bass: false, cap: false, sparse: false, grid: false, harmony: false, breathe: false },
-    overload: true, intensity: 1.5,
+    overload: true, intensity: 1.5, level: -15,
   },
 ];
 
@@ -820,6 +818,7 @@ function soundFor(choice) {
     sound: { ...BASE_SOUND, high: hi, [hi]: mode.high, [lo]: mode.low, ind: mode.ind, ...mode.switches },
     overload: mode.overload,
     intensity: mode.intensity,
+    level: mode.level,
   };
 }
 
@@ -1248,6 +1247,11 @@ function buildOrgan(ctx, spec, t0, out) {
 const FAMILY_BUILDERS = { wood: buildWood, brass: buildBrass, mallet: buildMallet, organ: buildOrgan };
 
 
+const MASTER_GAIN = 0.8;
+function masterGain(levelDb) {
+  return MASTER_GAIN * 10 ** (levelDb / 20);
+}
+
 class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -1255,7 +1259,7 @@ class AudioEngine {
     this.maxVoices = MAX_VOICES;
     this.overload = true;
     this.intensity = 1;
-    this.volume = 0.8;
+    this.levelDb = 0;
     this.error = null;
     this._grit = 0;
     this._curves = new Map();
@@ -1284,7 +1288,7 @@ class AudioEngine {
       this.comp.attack.value = 0.003;
       this.comp.release.value = 0.15;
       this.master = ctx.createGain();
-      this.master.gain.value = this.volume;
+      this.master.gain.value = masterGain(this.levelDb);
       this.pre.connect(this.shaper);
       this.shaper.connect(this.comp);
       this.comp.connect(this.master);
@@ -1334,9 +1338,9 @@ class AudioEngine {
     return Promise.resolve();
   }
 
-  setVolume(v) {
-    this.volume = v;
-    if (this.master) this.master.gain.setTargetAtTime(v, this.now, 0.02);
+  setLevel(db) {
+    this.levelDb = db;
+    if (this.master) this.master.gain.setTargetAtTime(masterGain(db), this.now, 0.02);
   }
 
   setOverload(on, intensity) {
@@ -2519,7 +2523,6 @@ class App {
       this.player.setSpeed(Number(e.target.value));
       this.updateHash();
     });
-    $('volume').addEventListener('input', (e) => this.engine.setVolume(Number(e.target.value)));
     $('sound-mode').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-mode]');
       if (b && b.dataset.mode !== this.choice.mode) this.setChoice({ ...this.choice, mode: b.dataset.mode });
@@ -3114,11 +3117,12 @@ class App {
 
   applyChoice() {
     this.wall.setMode(this.choice.mode);
-    const { sound, overload, intensity } = soundFor(this.choice);
+    const { sound, overload, intensity, level } = soundFor(this.choice);
     this.sound = sound;
     this.pressure = { overload, intensity };
     this.player.setSound(sound);
     this.engine.setOverload(overload, intensity);
+    this.engine.setLevel(level);
     if (this.result) assignSlots(this.result.lines, sound);
     for (const b of $('sound-mode').querySelectorAll('button')) {
       const on = b.dataset.mode === this.choice.mode;
@@ -3200,7 +3204,6 @@ class App {
       if (this.engine.error) {
         this.showNotice(this.engine.error);
       } else {
-        this.engine.setVolume(Number($('volume').value));
         this.engine.setOverload(this.pressure.overload, this.pressure.intensity);
       }
     }
