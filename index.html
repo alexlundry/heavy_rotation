@@ -196,7 +196,7 @@ button, select, input { font-family: var(--font); }
 .chip-more:hover { border-color: var(--stage-muted); }
 .stchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; background: var(--stage-raised); border: 1px solid var(--stage-line); color: var(--stage-ink); padding: 0 8px 0 4px; border-radius: 999px; cursor: pointer; font-size: 12px; }
 .stchip.all { padding-left: 10px; font-weight: 700; }
-.stchip .count { color: var(--gray-200); font-size: 11px; font-variant-numeric: tabular-nums; }
+.stchip .count { display: inline-block; text-align: right; color: var(--gray-200); font-size: 11px; font-variant-numeric: tabular-nums; }
 .stchip:hover { border-color: var(--stage-muted); }
 .stchip.on { border-color: var(--accent); }
 .chips.filtering .stchip:not(.on):not(.all) { opacity: 0.45; }
@@ -546,6 +546,25 @@ function stationsFor(airings, data) {
       return { station, call: st.call, affiliate: st.affiliate, family: st.family, count };
     })
     .sort((x, y) => y.count - x.count || x.call.localeCompare(y.call));
+}
+
+function stationTimes(airings) {
+  const times = new Map();
+  for (const a of airings) {
+    if (!times.has(a.station)) times.set(a.station, []);
+    times.get(a.station).push(a.t);
+  }
+  return times;
+}
+
+function tallyBefore(times, t) {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < t) lo = mid + 1; else hi = mid;
+  }
+  return lo;
 }
 
 function daypartSpansFor(airings) {
@@ -3132,6 +3151,7 @@ class App {
     prefix[0] = 0;
     result.airings.forEach((a, i) => { prefix[i + 1] = prefix[i] + a.impr; });
     this.imprPrefix = prefix;
+    this.tallyTimes = stationTimes(result.airings);
 
     this.player.load(result);
     this.ripples.length = 0;
@@ -3236,6 +3256,7 @@ class App {
   buildChips() {
     const el = $('chip-list');
     el.innerHTML = '';
+    this.chipEls = new Map();
     const stations = this.result ? this.result.stations : [];
     $('chips').hidden = !stations.length;
     if (!stations.length) return;
@@ -3251,7 +3272,7 @@ class App {
       b.className = 'stchip';
       b.type = 'button';
       b.dataset.station = String(st.station);
-      b.title = `${st.call}, ${st.affiliate && st.affiliate !== st.call ? st.affiliate : st.family}. ${fmtInt(st.count)} airings. Click to hear only this station.`;
+      b.title = `${st.call}, ${st.affiliate && st.affiliate !== st.call ? st.affiliate : st.family}. ${fmtInt(st.count)} airings all day. Click to hear only this station.`;
       b.appendChild(networkMark(this.media, st, st.station, 44, 16));
       if (st.call !== st.affiliate) {
         const c = document.createElement('span');
@@ -3260,9 +3281,11 @@ class App {
       }
       const n = document.createElement('span');
       n.className = 'count';
-      n.textContent = fmtInt(st.count);
+      n.textContent = '0';
+      n.style.minWidth = `${fmtInt(st.count).length}ch`;
       b.appendChild(n);
       frag.appendChild(b);
+      this.chipEls.set(st.station, { chip: b, count: n });
     }
     el.appendChild(frag);
     this.syncChips();
@@ -3291,6 +3314,14 @@ class App {
     for (const c of overflow) c.hidden = true;
     more.textContent = `+${overflow.length} ▾`;
     more.setAttribute('aria-label', `Show all ${chips.length - 1} stations`);
+  }
+
+  updateTallies(t) {
+    if (!this.chipEls) return;
+    for (const [station, { count }] of this.chipEls) {
+      const text = fmtInt(tallyBefore(this.tallyTimes.get(station) || [], t));
+      if (count.textContent !== text) count.textContent = text;
+    }
   }
 
   syncChips() {
@@ -3728,6 +3759,7 @@ class App {
       this.renderer.muted = this.skyView.muted;
       this.renderer.drawDensity({ dataTime: t });
       this.updateReadouts(t, grit);
+      this.updateTallies(t);
       this.updateNowOn(ts);
       this.dirty = false;
     }
