@@ -172,9 +172,9 @@ button, select, input { font-family: var(--font); }
 .mon-now { min-width: 0; }
 .now-label { color: var(--stage-muted); }
 .now-line { display: flex; align-items: center; gap: 8px; margin-top: 2px; height: 26px; overflow: hidden; }
-.now-call { font-size: 12px; color: var(--stage-muted); }
+.now-call { flex: none; font-size: 12px; color: var(--stage-muted); }
 .now-program { font-size: 16px; font-weight: 700; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.genre-chip { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; }
+.genre-chip { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; }
 .genre-chip.g0 { color: var(--g-news); }
 .genre-chip.g1 { color: var(--g-ent); }
 .genre-chip.g2 { color: var(--g-sports); }
@@ -234,7 +234,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 
 .logo-plate { display: inline-flex; align-items: center; justify-content: center; background: #FFFFFF; border-radius: 3px; padding: 2px 4px; line-height: 0; flex: none; }
 .logo-plate img { display: block; }
-.now-mark { display: inline-flex; }
+.now-mark { display: inline-flex; flex: none; }
 .stchip .logo-plate { padding: 2px 3px; }
 
 .wall { display: grid; grid-template-columns: repeat(var(--wall-cols, 8), minmax(0, 1fr)); gap: 6px; padding: 10px 14px; background: var(--stage-panel); border-bottom: 1px solid var(--stage-line); }
@@ -324,7 +324,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
       <div class="stats">
         <div class="stat"><span class="stat-value" id="stat-ads">0</span><span class="stat-label">ads so far</span></div>
         <div class="stat"><span class="stat-value" id="stat-hour">0</span><span class="stat-label">last hour</span></div>
-        <div class="stat"><span class="stat-value" id="stat-impr">0</span><span class="stat-label">swing voter impressions</span></div>
+        <div class="stat"><span class="stat-value" id="stat-impr">0</span><span class="stat-label">swing voter<br>impressions</span></div>
         <div class="stat meter"><div class="meter-track"><div class="meter-fill" id="meter-fill"></div></div><span class="stat-label">pressure</span></div>
       </div>
     </div>
@@ -372,7 +372,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
         <li><b>Cable</b> airings sound muffled and distant, like a TV in the next <span class="tail">room. <button class="demo-btn" type="button" data-demo="media" aria-label="Hear broadcast, then cable">&#9654;</button></span></li>
         <li><b>Pressure.</b> <span id="explain-pressure">The pressure meter climbs as ads pile up per minute.</span> <button class="demo-btn" type="button" data-demo="pressure" aria-label="Hear the pile-up">&#9654;</button></li>
         <li><b>Ad wall.</b> The screens just above the timeline show each ad you hear as it airs, with its network. Turn it off with Ad wall.</li>
-        <li><b>Dots.</b> The key above the timeline decodes them. Color is the sponsor&rsquo;s party, fill is the ad&rsquo;s tone, size is its length, and cable airings are fainter. Hover any dot to see the ad, the show it ran in, and how many swing voter impressions it made. Click it to keep the card open and watch the ad on AdImpact.</li>
+        <li><b>Dots.</b> The key above the timeline decodes them. Color is the sponsor&rsquo;s party, the mark is the ad&rsquo;s tone (a filled circle for positive, an empty circle for contrast, an X for negative), size is its length, and cable airings are fainter. Hover any dot to see the ad, the show it ran in, and how many swing voter impressions it made. Click it to keep the card open and watch the ad on AdImpact.</li>
         <li><b>Bars.</b> Each bar counts the ads in 15 minutes, stacked by the kind of show they ran in. Hover a bar for its breakdown by party and show type, and its swing voter impressions.</li>
         <li><b>Stations.</b> Click a station badge to hear only that channel. Click a row to hear only that advertiser. Both at once narrows to both.</li>
       </ul>
@@ -1651,20 +1651,21 @@ const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p', '12a'];
 function dotShape(a) {
   const untagged = a.tone === TONE.UNTAGGED;
   const r = (DOT_RADIUS[a.spot] || 3) * (untagged ? 0.7 : 1);
-  const style = a.tone === TONE.NEGATIVE ? 'ring' : a.tone === TONE.CONTRAST ? 'half' : 'fill';
+  const style = a.tone === TONE.NEGATIVE ? 'x' : a.tone === TONE.CONTRAST ? 'ring' : 'fill';
   const alpha = (a.media === MEDIA.CABLE ? 0.6 : 1) * (untagged ? 0.7 : 1);
   return { r, style, alpha };
 }
 
 const DOT_STROKE = 1.5;
+const X_REACH = 0.85;
 
 function dotGlyphSvg({ r, style, alpha }, color, box = 12) {
   const c = box / 2;
-  const ring = `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${color}" stroke-width="${DOT_STROKE}"/>`;
+  const k = r * X_REACH;
   const shape = style === 'ring'
-    ? ring
-    : style === 'half'
-      ? `${ring}<path d="M${c} ${c - r} A${r} ${r} 0 0 0 ${c} ${c + r} Z" fill="${color}"/>`
+    ? `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${color}" stroke-width="${DOT_STROKE}"/>`
+    : style === 'x'
+      ? `<path d="M${c - k} ${c - k}L${c + k} ${c + k}M${c + k} ${c - k}L${c - k} ${c + k}" stroke="${color}" stroke-width="${DOT_STROKE}" stroke-linecap="round"/>`
       : `<circle cx="${c}" cy="${c}" r="${r}" fill="${color}"/>`;
   return `<svg width="${box}" height="${box}" viewBox="0 0 ${box} ${box}" aria-hidden="true" opacity="${alpha}">${shape}</svg>`;
 }
@@ -1799,17 +1800,18 @@ class Renderer {
         ctx.strokeStyle = color;
         ctx.lineWidth = DOT_STROKE;
         ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        if (style === 'ring') {
+        if (style === 'x') {
+          const k = r * X_REACH;
+          ctx.lineCap = 'round';
+          ctx.moveTo(x - k, y - k);
+          ctx.lineTo(x + k, y + k);
+          ctx.moveTo(x + k, y - k);
+          ctx.lineTo(x - k, y + k);
           ctx.stroke();
-        } else if (style === 'half') {
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(x, y, r, Math.PI / 2, (Math.PI * 3) / 2);
-          ctx.closePath();
-          ctx.fill();
         } else {
-          ctx.fill();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          if (style === 'ring') ctx.stroke();
+          else ctx.fill();
         }
       }
     }
@@ -2443,7 +2445,8 @@ class App {
     const speed = parsed.speed || DEFAULT_SPEED;
     $('speed').value = String(speed);
     this.player.setSpeed(speed);
-    this.choice = parseSound(parsed.sound || readStoredSound());
+    const stored = readStoredSound();
+    this.choice = parseSound(parsed.sound || (stored && { hi: stored.hi }));
     if (parsed.sound) writeStoredSound(this.choice);
     this.applyChoice();
     this.applyScene(parsed.scene);
