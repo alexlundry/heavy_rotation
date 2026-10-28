@@ -166,7 +166,8 @@ button, select, input { font-family: var(--font); }
 .footer-site:hover { color: var(--head); }
 .page-end { margin-top: 0; }
 
-.monitor { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 24px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--stage-line); background: var(--stage-panel); }
+#sky { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+.monitor { position: relative; isolation: isolate; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 24px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--stage-line); background: var(--stage-panel); }
 .mon-time { display: flex; flex-direction: column; }
 .daypart { color: var(--stage-muted); min-height: 14px; margin-top: 4px; }
 .mon-now { min-width: 0; }
@@ -308,6 +309,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 
   <section class="stage" id="stage">
     <div class="monitor" id="monitor">
+      <canvas id="sky" aria-hidden="true"></canvas>
       <div class="mon-time">
         <div class="clock" id="clock">12:00 AM</div>
         <div class="daypart" id="now-daypart"></div>
@@ -909,6 +911,181 @@ function voiceSpec(row, airing, config = BASE_SOUND) {
     ...(config.breathe ? { attack: BREATHE_ATTACK_S, release: BREATHE_RELEASE_S } : {}),
     pan,
   };
+}
+
+// ---- src/sky.js ----
+
+const RAD = Math.PI / 180;
+const sin = (d) => Math.sin(d * RAD);
+const cos = (d) => Math.cos(d * RAD);
+const norm = (d) => ((d % 360) + 360) % 360;
+
+const MARKET_COORDS = {
+  'Columbus, OH': [39.9612, -82.9988],
+  'Portland-Auburn, ME': [43.6591, -70.2568],
+};
+
+const SUN_HORIZON = -0.833;
+const MOON_HORIZON = -0.833;
+
+function daysSinceJ2000(utcMs) {
+  return utcMs / 86400000 + 2440587.5 - 2451545.0;
+}
+
+function sunEcliptic(d) {
+  const g = 357.529 + 0.98560028 * d;
+  const q = 280.459 + 0.98564736 * d;
+  return norm(q + 1.915 * sin(g) + 0.020 * sin(2 * g));
+}
+
+function moonEcliptic(d) {
+  const T = d / 36525;
+  const lon = 218.32 + 481267.881 * T
+    + 6.29 * sin(135.0 + 477198.87 * T) - 1.27 * sin(259.3 - 413335.36 * T)
+    + 0.66 * sin(235.7 + 890534.22 * T) + 0.21 * sin(269.9 + 954397.74 * T)
+    - 0.19 * sin(357.5 + 35999.05 * T) - 0.11 * sin(186.5 + 966404.03 * T);
+  const lat = 5.13 * sin(93.3 + 483202.02 * T) + 0.28 * sin(228.2 + 960400.89 * T)
+    - 0.28 * sin(318.3 + 6003.15 * T) - 0.17 * sin(217.6 - 407332.21 * T);
+  const parallax = 0.9508 + 0.0518 * cos(135.0 + 477198.87 * T) + 0.0095 * cos(259.3 - 413335.36 * T)
+    + 0.0078 * cos(235.7 + 890534.22 * T) + 0.0028 * cos(269.9 + 954397.74 * T);
+  return { lon: norm(lon), lat, parallax };
+}
+
+function horizontal(d, eclLon, eclLat, lat, lon) {
+  const e = 23.439 - 0.00000036 * d;
+  const x = cos(eclLat) * cos(eclLon);
+  const y = cos(e) * cos(eclLat) * sin(eclLon) - sin(e) * sin(eclLat);
+  const z = sin(e) * cos(eclLat) * sin(eclLon) + cos(e) * sin(eclLat);
+  const ra = Math.atan2(y, x) / RAD;
+  const dec = Math.asin(z) / RAD;
+  const lst = 280.46061837 + 360.98564736629 * d + lon;
+  const ha = lst - ra;
+  const alt = Math.asin(sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(ha)) / RAD;
+  const az = norm(Math.atan2(sin(ha), cos(ha) * sin(lat) - Math.tan(dec * RAD) * cos(lat)) / RAD + 180);
+  return { alt, az };
+}
+
+function refraction(alt) {
+  if (alt < -1) return 0;
+  return 1.02 / Math.tan((alt + 10.3 / (alt + 5.11)) * RAD) / 60;
+}
+
+function sunPosition(utcMs, lat, lon) {
+  const d = daysSinceJ2000(utcMs);
+  const { alt, az } = horizontal(d, sunEcliptic(d), 0, lat, lon);
+  return { alt: alt + refraction(alt), az };
+}
+
+function moonPosition(utcMs, lat, lon) {
+  const d = daysSinceJ2000(utcMs);
+  const m = moonEcliptic(d);
+  const { alt: geo, az } = horizontal(d, m.lon, m.lat, lat, lon);
+  const alt = geo - m.parallax * cos(geo);
+  return { alt: alt + refraction(alt), az };
+}
+
+function moonPhase(utcMs) {
+  const d = daysSinceJ2000(utcMs);
+  const elong = norm(moonEcliptic(d).lon - sunEcliptic(d));
+  return { lit: (1 - cos(elong)) / 2, waxing: elong < 180 };
+}
+
+function tzOffsetMinutes(tz, utcMs) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+  }).formatToParts(new Date(utcMs));
+  const v = Object.fromEntries(parts.map((p) => [p.type, Number(p.value)]));
+  return Math.round((Date.UTC(v.year, v.month - 1, v.day, v.hour, v.minute, v.second) - utcMs) / 60000);
+}
+
+function crossings(alts, step, horizon) {
+  const rises = [];
+  const sets = [];
+  for (let i = 1; i < alts.length; i++) {
+    const a = alts[i - 1] - horizon;
+    const b = alts[i] - horizon;
+    if ((a < 0) === (b < 0)) continue;
+    const t = (i - 1 + a / (a - b)) * step;
+    (a < 0 ? rises : sets).push(t);
+  }
+  return { rises, sets };
+}
+
+function daySky({ date, market, tz }, step = 120) {
+  const at = MARKET_COORDS[market];
+  if (!at || !date) return null;
+  const [lat, lon] = at;
+  const [y, m, d] = date.split('-').map(Number);
+  const noonGuess = Date.UTC(y, m - 1, d, 12);
+  const offset = tzOffsetMinutes(tz || 'UTC', noonGuess);
+  const midnight = Date.UTC(y, m - 1, d) - offset * 60000;
+  const n = Math.round(86400 / step) + 1;
+  const sun = new Float32Array(n);
+  const moon = new Float32Array(n);
+  const sunAz = new Float32Array(n);
+  const moonAz = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const ms = midnight + i * step * 1000;
+    const s = sunPosition(ms, lat, lon);
+    const m = moonPosition(ms, lat, lon);
+    sun[i] = s.alt;
+    sunAz[i] = s.az;
+    moon[i] = m.alt;
+    moonAz[i] = m.az;
+  }
+  return {
+    step,
+    sun,
+    moon,
+    sunAz,
+    moonAz,
+    sunTimes: crossings(sun, step, SUN_HORIZON),
+    moonTimes: crossings(moon, step, MOON_HORIZON),
+    phase: moonPhase(midnight + 43200000),
+    sunHorizon: SUN_HORIZON,
+    moonHorizon: MOON_HORIZON,
+  };
+}
+
+function altitudeAt(series, step, t) {
+  const f = Math.min(Math.max(t / step, 0), series.length - 1);
+  const i = Math.min(Math.floor(f), series.length - 2);
+  return series[i] + (series[i + 1] - series[i]) * (f - i);
+}
+
+const STAGE_TINT = Object.freeze({
+  stage: { night: '#191A5C', day: '#11243D', dusk: '#401132' },
+  panel: { night: '#1F2068', day: '#152B47', dusk: '#4A163A' },
+  DAY_MAX: 0.4,
+  DUSK_MAX: 0.3,
+});
+
+const smoothstep = (a, b, x) => {
+  const u = Math.min(Math.max((x - a) / (b - a), 0), 1);
+  return u * u * (3 - 2 * u);
+};
+
+function daylight(sunAlt) {
+  return {
+    day: smoothstep(-6, 12, sunAlt),
+    dusk: Math.max(0, 1 - Math.abs(sunAlt + 2) / 9),
+  };
+}
+
+function mixHex(a, b, f) {
+  const out = [1, 3, 5].map((i) => {
+    const x = parseInt(a.slice(i, i + 2), 16);
+    const y = parseInt(b.slice(i, i + 2), 16);
+    return Math.round(x + (y - x) * f).toString(16).padStart(2, '0');
+  });
+  return `#${out.join('')}`.toUpperCase();
+}
+
+function stageColors(sunAlt) {
+  const { day, dusk } = daylight(sunAlt);
+  const tint = (c) => mixHex(mixHex(c.night, c.day, day * STAGE_TINT.DAY_MAX), c.dusk, dusk * STAGE_TINT.DUSK_MAX);
+  return { stage: tint(STAGE_TINT.stage), panel: tint(STAGE_TINT.panel) };
 }
 
 // ---- src/demos.js ----
@@ -1637,6 +1814,7 @@ class Player {
 
 
 
+
 const ROW_H = 22;
 const GROUP_H = 28;
 const DENSITY_H = 84;
@@ -2006,6 +2184,214 @@ class Renderer {
   }
 }
 
+const SKY = Object.freeze({ AZ_LEFT: 70, AZ_RIGHT: 290, ALT_TOP: 62, TOP_PAD: 6 });
+const SUN_RGB = '255, 214, 120';
+const MOON_RGB = '226, 230, 255';
+const SUN_R = 15;
+const MOON_R = 11;
+
+function makeClouds(n = 6) {
+  let seed = 20261023;
+  const rand = () => ((seed = Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296;
+  return Array.from({ length: n }, (_, i) => {
+    const puffs = 4 + Math.floor(rand() * 3);
+    return {
+      x: (i + rand() * 0.6) / n,
+      y: 0.18 + rand() * 0.42,
+      size: 0.75 + rand() * 0.6,
+      speed: 0.9 + rand() * 0.8,
+      puffs: Array.from({ length: puffs }, (_, k) => ({
+        dx: (k - (puffs - 1) / 2) * (0.5 + rand() * 0.25),
+        dy: (rand() - 0.5) * 0.5 - (k % 2 ? 0.25 : 0),
+        r: 0.7 + rand() * 0.6,
+      })),
+    };
+  });
+}
+
+class SkyView {
+  constructor(canvas, stage) {
+    this.canvas = canvas;
+    this.stage = stage;
+    this.ctx = canvas ? canvas.getContext('2d') : null;
+    this.sky = null;
+    this.t = null;
+    this.tint = null;
+    this.width = 1;
+    this.height = 1;
+    this.clouds = makeClouds();
+    if (canvas && typeof ResizeObserver === 'function') new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
+  }
+
+  setSky(sky) {
+    this.sky = sky;
+    this.t = null;
+    if (!sky) this.setTint(null);
+  }
+
+  resize() {
+    if (!this.canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const box = this.canvas.parentElement;
+    this.width = Math.max(1, box.clientWidth);
+    this.height = Math.max(1, box.clientHeight);
+    this.dpr = dpr;
+    this.canvas.width = Math.round(this.width * dpr);
+    this.canvas.height = Math.round(this.height * dpr);
+    if (this.t != null) {
+      const t = this.t;
+      this.t = null;
+      this.draw(t);
+    }
+  }
+
+  setTint(colors) {
+    const key = colors ? `${colors.stage}${colors.panel}` : '';
+    if (key === this.tint || !this.stage) return;
+    this.tint = key;
+    for (const [prop, v] of [['--stage', colors && colors.stage], ['--stage-panel', colors && colors.panel]]) {
+      if (v) this.stage.style.setProperty(prop, v); else this.stage.style.removeProperty(prop);
+    }
+  }
+
+  point(alt, az, horizon) {
+    const x = ((az - SKY.AZ_LEFT) / (SKY.AZ_RIGHT - SKY.AZ_LEFT)) * this.width;
+    const y = this.height - ((alt - horizon) / SKY.ALT_TOP) * (this.height - SKY.TOP_PAD);
+    return [x, y];
+  }
+
+  path(ctx, alts, azs, horizon, rgb, t) {
+    const upTo = Math.min(alts.length - 1, Math.floor(t / this.sky.step));
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 5]);
+    for (const [alpha, to] of [[0.08, alts.length - 1], [0.18, upTo]]) {
+      ctx.strokeStyle = `rgba(${rgb}, ${alpha})`;
+      ctx.beginPath();
+      let pen = false;
+      for (let i = 0; i <= to; i++) {
+        if (alts[i] < horizon - 1) { pen = false; continue; }
+        const [x, y] = this.point(alts[i], azs[i], horizon);
+        if (pen) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        pen = true;
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  glow(ctx, x, y, radius, stops) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    for (const [at, color] of stops) g.addColorStop(at, color);
+    ctx.fillStyle = g;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+
+  drawClouds(ctx, t, day, dusk) {
+    const fade = day * 0.85 + dusk * 0.4;
+    if (fade <= 0.01) return;
+    const { width: W, height: H } = this;
+    const unit = Math.min(Math.max(H * 0.22, 16), 34);
+    const span = W + unit * 8;
+    const rgb = dusk > 0.05 ? '255, 214, 196' : '235, 242, 255';
+    for (const c of this.clouds) {
+      const cx = ((c.x * span + (t / 86400) * 1.5 * span * c.speed) % span) - unit * 4;
+      const cy = c.y * H;
+      for (const p of c.puffs) {
+        const r = unit * c.size * p.r;
+        this.glow(ctx, cx + p.dx * unit * c.size * 1.6, cy + p.dy * unit * c.size, r, [
+          [0, `rgba(${rgb}, ${0.13 * fade})`],
+          [0.55, `rgba(${rgb}, ${0.08 * fade})`],
+          [1, `rgba(${rgb}, 0)`],
+        ]);
+      }
+    }
+  }
+
+  draw(t) {
+    const { ctx, sky } = this;
+    if (!ctx || (this.t != null && Math.abs(t - this.t) < 20)) return;
+    this.t = t;
+    const { dpr = 1, width: W, height: H } = this;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (!sky) return;
+    const sunAlt = altitudeAt(sky.sun, sky.step, t);
+    const sunAz = altitudeAt(sky.sunAz, sky.step, t);
+    const moonAlt = altitudeAt(sky.moon, sky.step, t);
+    const moonAz = altitudeAt(sky.moonAz, sky.step, t);
+    this.setTint(stageColors(sunAlt));
+    const { day, dusk } = daylight(sunAlt);
+
+    if (day > 0) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, 'rgba(120, 170, 255, 0)');
+      g.addColorStop(1, `rgba(140, 190, 255, ${0.10 * day})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    const night = 1 - daylight(sunAlt + 10).day;
+    if (night > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.3 * night})`;
+      let seed = 7;
+      const rand = () => ((seed = Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296;
+      for (let i = 0; i < Math.round((W * H) / 2200); i++) {
+        const r = 0.5 + rand() * 0.7;
+        ctx.fillRect(rand() * W, rand() * H * 0.9, r, r);
+      }
+    }
+    if (dusk > 0) {
+      const [gx] = this.point(0, sunAz, 0);
+      this.glow(ctx, gx, H, Math.max(H * 2, W * 0.3), [
+        [0, `rgba(255, 140, 84, ${0.30 * dusk})`],
+        [0.45, `rgba(255, 110, 120, ${0.08 * dusk})`],
+        [1, 'rgba(255, 110, 120, 0)'],
+      ]);
+    }
+
+    this.path(ctx, sky.sun, sky.sunAz, sky.sunHorizon, SUN_RGB, t);
+    this.path(ctx, sky.moon, sky.moonAz, sky.moonHorizon, MOON_RGB, t);
+
+    if (moonAlt > sky.moonHorizon - 6) {
+      const [mx, my] = this.point(moonAlt, moonAz, sky.moonHorizon);
+      this.glow(ctx, mx, my, MOON_R * 4.5, [[0, `rgba(${MOON_RGB}, ${0.10 + 0.12 * sky.phase.lit})`], [1, `rgba(${MOON_RGB}, 0)`]]);
+      this.moonFace(ctx, mx, my, MOON_R, sky.phase);
+    }
+    if (sunAlt > sky.sunHorizon - 6) {
+      const [sx, sy] = this.point(sunAlt, sunAz, sky.sunHorizon);
+      this.glow(ctx, sx, sy, SUN_R * 5.5, [
+        [0, 'rgba(255, 236, 180, 0.62)'],
+        [0.16, 'rgba(255, 228, 160, 0.5)'],
+        [0.22, `rgba(${SUN_RGB}, 0.22)`],
+        [0.5, `rgba(${SUN_RGB}, 0.08)`],
+        [1, `rgba(${SUN_RGB}, 0)`],
+      ]);
+    }
+    this.drawClouds(ctx, t, day, dusk);
+  }
+
+  moonFace(ctx, x, y, r, { lit, waxing }) {
+    const rx = r * Math.abs(2 * lit - 1);
+    const crescent = lit < 0.5;
+    ctx.save();
+    ctx.filter = 'blur(1.5px)';
+    ctx.fillStyle = `rgba(${MOON_RGB}, 0.08)`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(${MOON_RGB}, 0.6)`;
+    ctx.beginPath();
+    if (waxing) {
+      ctx.arc(x, y, r, -Math.PI / 2, Math.PI / 2, false);
+      ctx.ellipse(x, y, rx, r, 0, Math.PI / 2, -Math.PI / 2, crescent);
+    } else {
+      ctx.arc(x, y, r, Math.PI / 2, (Math.PI * 3) / 2, false);
+      ctx.ellipse(x, y, rx, r, 0, -Math.PI / 2, Math.PI / 2, crescent);
+    }
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 // ---- src/tooltip.js ----
 class Tooltip {
   constructor(el) {
@@ -2319,6 +2705,7 @@ class Wall {
 
 
 
+
 const $ = (id) => document.getElementById(id);
 const PICKERS_BY_MODE = { 'market-race': ['market', 'election'], market: ['market'], station: ['market', 'station'] };
 const TYPE_LABELS = ['Candidate', 'Issue group', 'Coordinated', 'Other'];
@@ -2433,6 +2820,8 @@ class App {
       },
     });
     this.renderer = new Renderer({ timeline: $('timeline'), density: $('density'), lane: $('lane'), dayparts: data.dayparts });
+    this.skyView = new SkyView($('sky'), $('stage'));
+    this.skies = new Map();
     this.tooltip = new Tooltip($('tooltip'));
     wireExplainer($('howto'), (id, btn) => this.previewDemo(id, btn));
 
@@ -2454,6 +2843,7 @@ class App {
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.fitChips());
     window.addEventListener('resize', () => {
       if (this.result && !this.result.empty) this.renderer.resize();
+      this.skyView.resize();
       this.layoutWall();
       this.fitChips();
       this.dirty = true;
@@ -2663,6 +3053,14 @@ class App {
     return s;
   }
 
+  skyFor(name) {
+    if (!this.skies.has(name)) {
+      const market = this.data.markets.find((m) => m.name === name);
+      this.skies.set(name, market ? daySky({ date: this.data.date, market: name, tz: market.tz }) : null);
+    }
+    return this.skies.get(name);
+  }
+
   applyScene(scene) {
     if (!this.views.includes(scene.mode)) scene = this.resolveScene({ ...scene, mode: this.views[0] });
     this.scene = scene;
@@ -2674,6 +3072,7 @@ class App {
     const result = buildScene(this.index, scene);
     assignSlots(result.lines, this.sound);
     this.result = result;
+    this.skyView.setSky(this.skyFor(scene.market || this.data.markets[0].name));
     const prefix = new Array(result.airings.length + 1);
     prefix[0] = 0;
     result.airings.forEach((a, i) => { prefix[i + 1] = prefix[i] + a.impr; });
@@ -3270,6 +3669,7 @@ class App {
       const grit = gritFromApm(this.result.apm[Math.min(1439, Math.floor(t / 60))]);
       this.engine.setGrit(this.player.playing ? grit : 0);
       this.renderer.drawFrame({ dataTime: t, ripples: this.ripples, now: ts });
+      this.skyView.draw(t);
       this.renderer.drawDensity({ dataTime: t });
       this.updateReadouts(t, grit);
       this.updateNowOn(ts);
