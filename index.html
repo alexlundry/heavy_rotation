@@ -338,7 +338,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
         <button class="chip-more" id="chip-more" type="button" aria-expanded="false" aria-controls="chip-list" hidden></button>
       </div>
       <div class="wall" id="wall" aria-hidden="true"></div>
-      <div class="density-row">
+      <div class="density-row" id="density-row">
         <div class="corner">
           <div class="corner-label">ads per 15 min</div>
           <div class="genre-legend" id="genre-legend"></div>
@@ -2208,10 +2208,22 @@ class Renderer {
   }
 }
 
-const SKY = Object.freeze({ AZ_LEFT: 70, AZ_RIGHT: 290, ALT_TOP: 62, TOP_PAD: 6 });
+const SKY = Object.freeze({ AZ_LEFT: 70, AZ_RIGHT: 290, LOW: 6, MID: 12, TOP_PAD: 18 });
+
+function skyY(a, stops) {
+  let i = 0;
+  while (i < stops.length - 2 && a > stops[i + 1][0]) i++;
+  const [a0, y0] = stops[i];
+  const [a1, y1] = stops[i + 1];
+  return y0 + ((a - a0) / (a1 - a0)) * (y1 - y0);
+}
 const SUN_RGB = '255, 214, 120';
 const MOON_RGB = '226, 230, 255';
 const SUN_R = 15;
+const mixRgb = (a, b, f) => {
+  const [x, y] = [a, b].map((c) => c.split(',').map(Number));
+  return x.map((v, i) => Math.round(v + (y[i] - v) * f)).join(', ');
+};
 const MOON_R = 11;
 
 function makeClouds(n = 9) {
@@ -2234,12 +2246,14 @@ function makeClouds(n = 9) {
 }
 
 class SkyView {
-  constructor(canvas, stage, band = null) {
+  constructor(canvas, stage, band = null, ground = null) {
     this.canvas = canvas;
     this.stage = stage;
     this.band = band;
-    this.bandTop = 0;
+    this.ground = ground;
     this.bandH = 1;
+    this.stops = [[0, 1], [1, 0]];
+    this.altTop = 60;
     this.muted = SKY_MUTED.night;
     this.ctx = canvas ? canvas.getContext('2d') : null;
     this.sky = null;
@@ -2254,6 +2268,11 @@ class SkyView {
   setSky(sky) {
     this.sky = sky;
     this.t = null;
+    if (sky) {
+      const peak = (alts, horizon) => alts.reduce((m, v) => Math.max(m, v), -90) - horizon;
+      this.altTop = Math.max(peak(sky.sun, sky.sunHorizon), peak(sky.moon, sky.moonHorizon), SKY.MID + 10);
+      this.layout();
+    }
     if (!sky) {
       this.setTint(null);
       this.setMuted(SKY_MUTED.night);
@@ -2266,8 +2285,8 @@ class SkyView {
     const box = this.canvas.parentElement;
     this.width = Math.max(1, box.clientWidth);
     this.height = Math.max(1, box.clientHeight);
-    this.bandTop = this.band ? this.band.offsetTop : 0;
     this.bandH = this.band ? Math.max(1, this.band.offsetHeight) : this.height;
+    this.layout();
     this.dpr = dpr;
     this.canvas.width = Math.round(this.width * dpr);
     this.canvas.height = Math.round(this.height * dpr);
@@ -2287,6 +2306,13 @@ class SkyView {
     }
   }
 
+  layout() {
+    const H = this.height;
+    const bandBottom = this.band ? this.band.offsetTop + this.band.offsetHeight : H * 0.4;
+    const groundTop = this.ground ? Math.min(this.ground.offsetTop, H - 1) : H * 0.8;
+    this.stops = [[0, H], [SKY.LOW, groundTop], [SKY.MID, Math.min(bandBottom, groundTop - 1)], [this.altTop, SKY.TOP_PAD]];
+  }
+
   setMuted(color) {
     if (color === this.muted) return;
     this.muted = color;
@@ -2295,8 +2321,7 @@ class SkyView {
 
   point(alt, az, horizon) {
     const x = ((az - SKY.AZ_LEFT) / (SKY.AZ_RIGHT - SKY.AZ_LEFT)) * this.width;
-    const y = this.bandTop + this.bandH - ((alt - horizon) / SKY.ALT_TOP) * (this.bandH - SKY.TOP_PAD);
-    return [x, y];
+    return [x, skyY(alt - horizon, this.stops)];
   }
 
   path(ctx, alts, azs, horizon, rgb, t) {
@@ -2383,8 +2408,8 @@ class SkyView {
     if (dusk > 0) {
       const [gx] = this.point(0, sunAz, 0);
       this.glow(ctx, gx, H, Math.max(H * 1.1, W * 0.35), [
-        [0, `rgba(255, 140, 84, ${0.34 * dusk})`],
-        [0.45, `rgba(255, 110, 120, ${0.10 * dusk})`],
+        [0, `rgba(255, 140, 84, ${0.55 * dusk})`],
+        [0.45, `rgba(255, 110, 120, ${0.16 * dusk})`],
         [1, 'rgba(255, 110, 120, 0)'],
       ]);
     }
@@ -2392,37 +2417,37 @@ class SkyView {
     this.path(ctx, sky.sun, sky.sunAz, sky.sunHorizon, SUN_RGB, t);
     this.path(ctx, sky.moon, sky.moonAz, sky.moonHorizon, MOON_RGB, t);
 
-    const above = (alt, horizon) => Math.min(Math.max((alt - horizon + 3) / 4, 0), 1);
-    const moonUp = above(moonAlt, sky.moonHorizon);
-    if (moonUp > 0) {
+    if (moonAlt > sky.moonHorizon - 6) {
       const [mx, my] = this.point(moonAlt, moonAz, sky.moonHorizon);
-      this.glow(ctx, mx, my, MOON_R * 4.5, [[0, `rgba(${MOON_RGB}, ${(0.10 + 0.12 * sky.phase.lit) * moonUp})`], [1, `rgba(${MOON_RGB}, 0)`]]);
-      this.moonFace(ctx, mx, my, MOON_R, sky.phase, moonUp);
+      this.glow(ctx, mx, my, MOON_R * 4.5, [[0, `rgba(${MOON_RGB}, ${0.10 + 0.12 * sky.phase.lit})`], [1, `rgba(${MOON_RGB}, 0)`]]);
+      this.moonFace(ctx, mx, my, MOON_R, sky.phase);
     }
-    const sunUp = above(sunAlt, sky.sunHorizon);
-    if (sunUp > 0) {
+    if (sunAlt > sky.sunHorizon - 6) {
       const [sx, sy] = this.point(sunAlt, sunAz, sky.sunHorizon);
-      this.glow(ctx, sx, sy, SUN_R * 5.5, [
-        [0, `rgba(255, 240, 190, ${0.85 * sunUp})`],
-        [0.16, `rgba(255, 232, 168, ${0.7 * sunUp})`],
-        [0.22, `rgba(${SUN_RGB}, ${0.26 * sunUp})`],
-        [0.5, `rgba(${SUN_RGB}, ${0.08 * sunUp})`],
-        [1, `rgba(${SUN_RGB}, 0)`],
+      const low = Math.min(Math.max(1 - (sunAlt - sky.sunHorizon) / 8, 0), 1);
+      const core = mixRgb('255, 240, 190', '255, 178, 96', low);
+      const halo = mixRgb(SUN_RGB, '255, 128, 64', low);
+      this.glow(ctx, sx, sy, SUN_R * (5.5 + 2 * low), [
+        [0, `rgba(${core}, 0.85)`],
+        [0.16 - 0.03 * low, `rgba(${core}, 0.7)`],
+        [0.22 - 0.03 * low, `rgba(${halo}, ${0.26 + 0.12 * low})`],
+        [0.5, `rgba(${halo}, ${0.08 + 0.06 * low})`],
+        [1, `rgba(${halo}, 0)`],
       ]);
     }
     this.drawClouds(ctx, t, day, dusk);
   }
 
-  moonFace(ctx, x, y, r, { lit, waxing }, k = 1) {
+  moonFace(ctx, x, y, r, { lit, waxing }) {
     const rx = r * Math.abs(2 * lit - 1);
     const crescent = lit < 0.5;
     ctx.save();
     ctx.filter = 'blur(1.5px)';
-    ctx.fillStyle = `rgba(${MOON_RGB}, ${0.08 * k})`;
+    ctx.fillStyle = `rgba(${MOON_RGB}, 0.08)`;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = `rgba(${MOON_RGB}, ${0.7 * k})`;
+    ctx.fillStyle = `rgba(${MOON_RGB}, 0.7)`;
     ctx.beginPath();
     if (waxing) {
       ctx.arc(x, y, r, -Math.PI / 2, Math.PI / 2, false);
@@ -2864,7 +2889,7 @@ class App {
       },
     });
     this.renderer = new Renderer({ timeline: $('timeline'), density: $('density'), lane: $('lane'), dayparts: data.dayparts });
-    this.skyView = new SkyView($('sky'), $('stage'), $('monitor'));
+    this.skyView = new SkyView($('sky'), $('stage'), $('monitor'), $('density-row'));
     this.skies = new Map();
     this.tooltip = new Tooltip($('tooltip'));
     wireExplainer($('howto'), (id, btn) => this.previewDemo(id, btn));
