@@ -3702,7 +3702,9 @@ class App {
     $('explain-pitch').textContent = c.high === 'rep'
       ? 'Republicans high, Democrats low, independents and other groups in the middle.'
       : 'Democrats high, Republicans low, independents and other groups in the middle.';
-    $('explain-instrument').textContent = `In ${mode.label}, Democrats play ${L('dem')}, Republicans ${L('rep')}, everyone else ${L('ind')}.`;
+    $('explain-instrument').textContent = c.dem === c.rep
+      ? `In ${mode.label}, Democrats and Republicans both play ${L('dem')}, told apart by pitch. Everyone else plays ${L('ind')}.`
+      : `In ${mode.label}, Democrats play ${L('dem')}, Republicans ${L('rep')}, everyone else ${L('ind')}.`;
     $('explain-tone').textContent = c.plain
       ? `sound like every other ad in ${mode.label}. Switch to Blitz to hear them snarl down into their note with a burst of static.`
       : 'snarl down into their note with a burst of static and keep a permanent edge. Contrast ads bend half as far.';
