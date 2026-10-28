@@ -338,7 +338,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
         <button class="chip-more" id="chip-more" type="button" aria-expanded="false" aria-controls="chip-list" hidden></button>
       </div>
       <div class="wall" id="wall" aria-hidden="true"></div>
-      <div class="density-row" id="density-row">
+      <div class="density-row">
         <div class="corner">
           <div class="corner-label">ads per 15 min</div>
           <div class="genre-legend" id="genre-legend"></div>
@@ -2208,14 +2208,11 @@ class Renderer {
   }
 }
 
-const SKY = Object.freeze({ AZ_LEFT: 70, AZ_RIGHT: 290, LOW: 6, MID: 12, TOP_PAD: 18 });
+const SKY = Object.freeze({ AZ_LEFT: 70, AZ_RIGHT: 290, EASE: 4, TOP_PAD: 18 });
 
-function skyY(a, stops) {
-  let i = 0;
-  while (i < stops.length - 2 && a > stops[i + 1][0]) i++;
-  const [a0, y0] = stops[i];
-  const [a1, y1] = stops[i + 1];
-  return y0 + ((a - a0) / (a1 - a0)) * (y1 - y0);
+function skyY(a, { bottom, top, peak }) {
+  const u = Math.min(a / peak, 1);
+  return bottom - (bottom - top) * (1 - (1 - u) ** SKY.EASE);
 }
 const SUN_RGB = '255, 214, 120';
 const MOON_RGB = '226, 230, 255';
@@ -2246,14 +2243,12 @@ function makeClouds(n = 9) {
 }
 
 class SkyView {
-  constructor(canvas, stage, band = null, ground = null) {
+  constructor(canvas, stage, band = null) {
     this.canvas = canvas;
     this.stage = stage;
     this.band = band;
-    this.ground = ground;
     this.bandH = 1;
-    this.stops = [[0, 1], [1, 0]];
-    this.altTop = 60;
+    this.peak = 60;
     this.muted = SKY_MUTED.night;
     this.ctx = canvas ? canvas.getContext('2d') : null;
     this.sky = null;
@@ -2270,8 +2265,7 @@ class SkyView {
     this.t = null;
     if (sky) {
       const peak = (alts, horizon) => alts.reduce((m, v) => Math.max(m, v), -90) - horizon;
-      this.altTop = Math.max(peak(sky.sun, sky.sunHorizon), peak(sky.moon, sky.moonHorizon), SKY.MID + 10);
-      this.layout();
+      this.peak = Math.max(peak(sky.sun, sky.sunHorizon), peak(sky.moon, sky.moonHorizon), 20);
     }
     if (!sky) {
       this.setTint(null);
@@ -2286,7 +2280,6 @@ class SkyView {
     this.width = Math.max(1, box.clientWidth);
     this.height = Math.max(1, box.clientHeight);
     this.bandH = this.band ? Math.max(1, this.band.offsetHeight) : this.height;
-    this.layout();
     this.dpr = dpr;
     this.canvas.width = Math.round(this.width * dpr);
     this.canvas.height = Math.round(this.height * dpr);
@@ -2306,13 +2299,6 @@ class SkyView {
     }
   }
 
-  layout() {
-    const H = this.height;
-    const bandBottom = this.band ? this.band.offsetTop + this.band.offsetHeight : H * 0.4;
-    const groundTop = this.ground ? Math.min(this.ground.offsetTop, H - 1) : H * 0.8;
-    this.stops = [[0, H], [SKY.LOW, groundTop], [SKY.MID, Math.min(bandBottom, groundTop - 1)], [this.altTop, SKY.TOP_PAD]];
-  }
-
   setMuted(color) {
     if (color === this.muted) return;
     this.muted = color;
@@ -2321,7 +2307,7 @@ class SkyView {
 
   point(alt, az, horizon) {
     const x = ((az - SKY.AZ_LEFT) / (SKY.AZ_RIGHT - SKY.AZ_LEFT)) * this.width;
-    return [x, skyY(alt - horizon, this.stops)];
+    return [x, skyY(alt - horizon, { bottom: this.height, top: SKY.TOP_PAD, peak: this.peak })];
   }
 
   path(ctx, alts, azs, horizon, rgb, t) {
@@ -2889,7 +2875,7 @@ class App {
       },
     });
     this.renderer = new Renderer({ timeline: $('timeline'), density: $('density'), lane: $('lane'), dayparts: data.dayparts });
-    this.skyView = new SkyView($('sky'), $('stage'), $('monitor'), $('density-row'));
+    this.skyView = new SkyView($('sky'), $('stage'), $('monitor'));
     this.skies = new Map();
     this.tooltip = new Tooltip($('tooltip'));
     wireExplainer($('howto'), (id, btn) => this.previewDemo(id, btn));
